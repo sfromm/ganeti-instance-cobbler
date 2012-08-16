@@ -9,7 +9,42 @@ import socket
 # Reference
 # http://jmrodri.fedorapeople.org/cobbler-integration.pdf
 
-def cobbler_create(server, token, host):
+def system_exists(name, server):
+    try:
+        sys = server.find_system({'name': name})
+        if len(sys) > 0:
+            return True
+        else:
+            return False
+    except xmlrpclib.Fault, e:
+        sys.stderr.write("Failed to lookup system %s: %s\n" % (name, str(e)))
+        return False
+
+def cobbler_register_system(host, server):
+    netinfo = {}
+    reg_info = {}
+    netinfo['eth0'] = {
+        'ip_address'  : host['ipaddress'],
+        'mac_address' : host['macaddress']
+    }
+    reg_info['name'] = host['hostname']
+    reg_info['hostname'] = host['hostname']
+    reg_info['profile'] = host['profile']
+    reg_info['interfaces'] = netinfo
+    sys.stderr.write("Unable to set netboot_enabled due to unauthenticated session.\n")
+    try:
+        server.register_new_system(reg_info)
+        return True
+    except xmlrpclib.Fault, e:
+        sys.stderr.write("Failed to register system %s: %s\n" % (host['hostname'], str(e)))
+        return False
+
+def cobbler_create(host, server, token=None):
+    if system_exists(host['hostname'], server):
+        sys.stderr.write("System already registered under name %s\n" % host['hostname'])
+        return False
+    if token is None:
+        return cobbler_register_system(host, server)
     try:
         sys_id = server.new_system(token)
         server.modify_system(sys_id, 'name', host['hostname'], token)
@@ -22,14 +57,16 @@ def cobbler_create(server, token, host):
             }, token)
         server.modify_system(sys_id, 'profile', host['profile'], token)
         server.save_system(sys_id, token)
-        r = server.sync(token)
-        print r
+        server.sync(token)
         return True
     except xmlrpclib.Fault, e:
-        print "Failed to create system %s: %s" % (host['hostname'], str(e))
+        sys.stderr.write("Failed to create system %s: %s\n" % (host['hostname'], str(e)))
         return False
 
 def cobbler_rename(server, token, host):
+    if token is None:
+        sys.stderr.write("Cannot rename without authenticated session")
+        return False
     try:
         sys_id = server.get_system_handle(host['hostname'], token)
         server.rename_system(sys_id, host['newname'], token)
@@ -41,7 +78,7 @@ def cobbler_rename(server, token, host):
         r = server.sync(token)
         return True
     except xmlrpclib.Fault, e:
-        print "Failed to rename system %s: %s" % (host['hostname'], str(e))
+        sys.stderr.write("Failed to rename system %s: %s\n" % (host['hostname'], str(e)))
         return False
 
 def cobbler_export(server, token, host):
@@ -50,12 +87,19 @@ def cobbler_export(server, token, host):
 def cobbler_import(server, token, host):
     pass
 
-def cobbler_remove(server, token, host):
+def cobbler_remove(host, server, token):
+    if host['hostname'] is None:
+        sys.stderr.write("Require hostname argument.\n")
+        return False
+    if not system_exists(host['hostname'], server):
+        sys.stderr.write("System %s does not exist in cobbler.\n" % host['hostname'])
+        return False
     try:
         server.remove_system(host['hostname'], token)
+        server.sync(token)
         return True
     except xmlrpclib.Fault, e:
-        print "Failed to remove system %s: %s" % (host['hostname'], str(e))
+        sys.stderr.write("Failed to remove system %s: %s\n" % (host['hostname'], str(e)))
         return False
 
 def connect(url):
@@ -67,21 +111,27 @@ def connect(url):
         traceback.print_exc()
         return None
 
-def cobbler_login(server, user, passwd):
+def cobbler_login(remote, user, passwd):
     protos = ['http', 'https']
+    server = None
+    token = None
     for p in protos:
-        cobbler_url = '%s://%s/cobbler_api' % (p, server)
+        cobbler_url = '%s://%s/cobbler_api' % (p, remote)
         server = connect(cobbler_url)
         if server is not None:
             break
     if server is None:
-        print "Failed to connect to %s" % cobbler_url
+        sys.stderr.write("Failed to connect to %s\n" % cobbler_url)
         return (None, None)
-    try:
-        token = server.login(user, passwd)
-    except xmlrpclib.Fault, e:
-        print "Login to %s failed: %s" % (cobbler_url, str(e))
-        return (None, None)
+    if user is not None:
+        try:
+            token = server.login(user, passwd)
+        except xmlrpclib.Fault, e:
+            sys.stderr.write("Login to %s failed: %s\n" % (cobbler_url, str(e)))
+            return (None, None)
+        except TypeError, e:
+            sys.stderr.write("Login to %s failed: %s\n" % (cobbler_url, str(e)))
+            return (None, None)
     return (server, token)
 
 def main(args):
@@ -103,16 +153,17 @@ def main(args):
     parser.add_option('-P', '--profile', type='string', metavar='PROFILE',
                       help='cobbler profile')
     parser.add_option('-u', '--username', type='string', metavar='USER',
-                      help='cobbler user')
+                      help='Cobbler user.  '
+                          + 'If no user argument provided, will try '
+                          + 'to register system.  This requires register_new_installs'
+                          + ' set to true in cobbler settings.')
     parser.add_option('-p', '--password', type='string', metavar='PASSWORD',
-                      help='cobbler user password')
+                      help='Cobbler user password')
     (options, args) = parser.parse_args(args)
     if not options.server:
-        print "Need cobbler server to connect to"
+        sys.stderr.write("Need cobbler server to connect to.\n")
         return 1
-    if not options.username:
-        options.username = getpass.getuser()
-    if not options.password:
+    if options.username and not options.password:
         options.password = getpass.getpass()
     cobbler, token = cobbler_login(options.server, options.username, options.password)
     if cobbler is None:
@@ -123,16 +174,16 @@ def main(args):
             'ipaddress': '' }
     r = True
     if options.action == 'create':
-        r = cobbler_create(cobbler, token, host)
+        r = cobbler_create(host, cobbler, token)
     elif options.action == 'rename':
         host['newname'] = options.newname
-        r = cobbler_rename(cobbler, token, host)
+        r = cobbler_rename(host, cobbler, token)
     elif options.action == 'export':
         print "Not supported"
     elif options.action == 'import':
         print "Not supported"
     elif options.action == 'remove':
-        r = cobbler_remove(cobbler, token, host)
+        r = cobbler_remove(host, cobbler, token)
     return int(not r)
 
 if __name__ == '__main__':
