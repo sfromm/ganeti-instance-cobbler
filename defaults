@@ -1,0 +1,29 @@
+# ganeti-instance-cobbler defaults file
+
+# For more information on cobbler, please see
+# http://cobbler.github.com/
+
+# COBBLER_SERVER: The name of server that cobbler runs on.  The
+# URL http://<servername>/cobbler_api should be accessible
+# from the node the instance will be created on.
+#COBBLER_SERVER="cobbler.example.net"
+
+# COBBLER_PROFILE: The name of the cobbler profile that should
+# be applied to the new instance.
+#COBBLER_PROFILE="Server"
+
+# For authentication and authorization with cobbler, please review:
+# https://github.com/cobbler/cobbler/wiki/Web%20Authentication
+# https://github.com/cobbler/cobbler/wiki/Web%20Authorization
+
+# COBBLER_USER: The name of the user to authenticate as for XMLRPC
+# interaction with cobbler.  You can opt to not authenticate as a user
+# but you will be unable to set the netboot_enabled flag for a new
+# system.  This means the new instance will not pxeboot and kickstart.
+# If you do not want to authenticate, you must set:
+# register_new_installs: 1
+# in /etc/cobbler/settings.
+#COBBLER_USER="cobbler"
+
+# COBBLER_PASS: The password for the cobbler user to authenticate as.
+#COBBLER_PASS="my-password-here"
