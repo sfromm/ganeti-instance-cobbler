@@ -1,5 +1,5 @@
 AC_PREREQ(2.59)
-AC_INIT(ganeti-instance-cobbler, 0.1, stephenf@nero.net)
+AC_INIT(ganeti-instance-cobbler, 0.2, stephenf@nero.net)
 
 AC_CONFIG_AUX_DIR(autotools)
 AC_CONFIG_SRCDIR(configure)

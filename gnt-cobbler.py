@@ -24,19 +24,32 @@ import sys
 import getpass
 import socket
 
+__version__ = '0.2'
+
 # References
 # https://github.com/cobbler/cobbler/wiki/XMLRPC
 # http://jmrodri.fedorapeople.org/cobbler-integration.pdf
 
 def system_exists(name, server):
     try:
-        sys = server.find_system({'name': name})
-        if len(sys) > 0:
+        system = server.find_system({'name': name})
+        if len(system) > 0:
             return True
         else:
             return False
     except xmlrpclib.Fault, e:
         sys.stderr.write("Failed to lookup system %s: %s\n" % (name, str(e)))
+        return False
+
+def profile_exists(name, server):
+    try:
+        p = server.find_profile({'name': name})
+        if len(p) > 0:
+            return True
+        else:
+            return False
+    except xmlrpclib.Fault, e:
+        sys.stderr.write("Failed to lookup profile %s: %s\n" % (name, str(e)))
         return False
 
 def cobbler_register_system(host, server):
@@ -58,12 +71,31 @@ def cobbler_register_system(host, server):
         sys.stderr.write("Failed to register system %s: %s\n" % (host['hostname'], str(e)))
         return False
 
-def cobbler_create(host, server, token=None):
-    if system_exists(host['hostname'], server):
-        sys.stderr.write("System already registered under name %s\n" % host['hostname'])
+def cobbler_modify(host, server, token):
+    try:
+        sys_id = server.get_system_handle(host['hostname'], token)
+        server.modify_system(sys_id, 'netboot_enabled', True, token)
+        server.modify_system(sys_id, 'modify_interface', {
+            'dnsname-eth0'    : host['hostname'],
+            'ipaddress-eth0'  : host['ipaddress'],
+            'macaddress-eth0' : host['macaddress']
+            }, token)
+        server.modify_system(sys_id, 'profile', host['profile'], token)
+        server.save_system(sys_id, token)
+        return True
+    except xmlrpclib.Fault, e:
+        sys.stderr.write("Failed to modify system %s: %s\n" % (host['hostname'], str(e)))
         return False
+
+def cobbler_create(host, server, token=None):
     if token is None:
         return cobbler_register_system(host, server)
+    if not profile_exists(host['profile'], server):
+        sys.stderr.write("Failed to lookup profile %s\n" % profile)
+        return False
+    if system_exists(host['hostname'], server):
+        sys.stderr.write("System %s already registered; will modify existing system.\n" % host['hostname'])
+        return cobbler_modify(host, server, token)
     try:
         sys_id = server.new_system(token)
         server.modify_system(sys_id, 'name', host['hostname'], token)
@@ -153,12 +185,30 @@ def cobbler_login(remote, user, passwd):
             return (None, None)
     return (server, token)
 
+def cobbler_getks(server, **kwargs):
+    profile = kwargs['profile']
+    system = kwargs['system']
+    if profile:
+        if not profile_exists(profile, server):
+            sys.stderr.write("Failed to lookup profile %s\n" % profile)
+            return False
+    if system:
+        if not system_exists(system, server):
+            sys.stderr.write("Failed to lookup system %s\n" % system)
+            return False
+    try:
+        print server.generate_kickstart(profile, system)
+    except xmlrpclib.Fault, e:
+        sys.stderr.write("Failed to generate kickstart: %s\n" % (str(e)))
+        return False
+    return True
+
 def main(args):
-    parser = OptionParser()
+    parser = OptionParser(version=__version__)
     parser.add_option('-v', '--verbose', action='store_true',
                       help='Be verbose')
     parser.add_option('-x', '--action', metavar='ACTION',
-                      choices=['create', 'rename', 'backup', 'restore', 'remove'],
+                      choices=['create', 'rename', 'backup', 'restore', 'remove', 'getks'],
                       help='cobbler action')
     parser.add_option('-s', '--server', type='string',
                       help='cobbler server to connect to')
@@ -166,6 +216,9 @@ def main(args):
                       help='Name of system')
     parser.add_option('-N', '--newname', type='string',
                       help='New name of system in case of rename action')
+    parser.add_option('-i', '--ipaddress', type='string',
+                      metavar='IPADDR', default='',
+                      help='ip address of host')
     parser.add_option('-m', '--macaddress', type='string', metavar='MACADDR',
                       help='macaddress of host')
 
@@ -190,7 +243,7 @@ def main(args):
     host = { 'hostname': options.hostname,
             'macaddress': options.macaddress,
             'profile': options.profile,
-            'ipaddress': '' }
+            'ipaddress': options.ipaddress }
     r = True
     if options.action == 'create':
         r = cobbler_create(host, cobbler, token)
@@ -203,6 +256,15 @@ def main(args):
         print "Not supported"
     elif options.action == 'remove':
         r = cobbler_remove(host, cobbler, token)
+    elif options.action == 'getks':
+        kwargs = { 'system': '', 'profile': '' }
+        if options.hostname:
+            kwargs['system'] = options.hostname
+        elif options.profile:
+            kwargs['profile'] = options.profile
+        else:
+            parser.error("Require --hostname or --profile when used with getks action")
+        r = cobbler_getks(cobbler, **kwargs)
     return int(not r)
 
 if __name__ == '__main__':
