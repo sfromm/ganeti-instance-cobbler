@@ -49,13 +49,16 @@ fi
 
 GNT_COBBLER_ARGS="--server $COBBLER_SERVER "
 if [ -n "$COBBLER_USER" ]; then
-    GNT_COBBLER_ARGS="$GNT_COBBLER_ARGS --username $COBBLER_USER --password $COBBLER_PASS "
+    GNT_COBBLER_ARGS="$GNT_COBBLER_ARGS --username $COBBLER_USER"
 fi
 
 ./gnt-cobbler.py -x create $GNT_COBBLER_ARGS \
+                           --password "$COBBLER_PASS" \
                            --profile $COBBLER_PROFILE \
                            --hostname $INSTANCE_NAME \
-                           --macaddress $NIC_0_MAC
+                           --macaddress $NIC_0_MAC \
+                           --ipaddress $NIC_0_IP
+
 if [ $? -ne 0 ]; then
     log_error "Call to cobbler failed to create $INSTANCE_NAME"
     exit 1
