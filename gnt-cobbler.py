@@ -240,7 +240,9 @@ def main(args):
     cobbler, token = cobbler_login(options.server, options.username, options.password)
     if cobbler is None:
         return 1
-    host = { 'hostname': options.hostname,
+    options.sysname = options.hostname.split('.')[0]
+    host = { 'sysname': options.sysname,
+            'hostname': options.hostname,
             'macaddress': options.macaddress,
             'profile': options.profile,
             'ipaddress': options.ipaddress }
